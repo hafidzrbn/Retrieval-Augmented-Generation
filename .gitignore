@@ -44,6 +44,7 @@ env/
 # Local report files (untracked in remote repository)
 Laporan_Tugas_RAG.md
 Laporan_Tugas_RAG.pdf
+*.pdf
 tampilan awal chatbot.png
 tampilan chatbot setelah ada chatan.png
 transcript_pmp96hT8604.txt
