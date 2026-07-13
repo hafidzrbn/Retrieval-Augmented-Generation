@@ -2,7 +2,6 @@ import os
 import streamlit as st
 import requests
 import uuid
-from rag_engine import RAGEngine
 
 # Set Streamlit Page Configuration
 st.set_page_config(
@@ -19,27 +18,6 @@ if "preset_query" not in st.session_state:
     st.session_state.preset_query = None
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
-    
-# Initialize RAG Engine and Load Keys from Secrets
-gemini_key = st.secrets.get("gemini_api_key", "")
-cohere_key = ""  # Menggunakan pencarian kosinus standar tanpa Cohere Rerank agar performa cepat & mandiri
-openai_key = ""
-llm_provider = "gemini"
-
-vector_store_path = "data/beasiswa_vector_store.pkl"
-pdf_path = "data/panduan_beasiswa_indonesia.pdf"
-engine = RAGEngine(vector_store_path=vector_store_path)
-
-# Auto-initialize/Index Vector Database if not present
-db_exists = os.path.exists(vector_store_path)
-pdf_exists = os.path.exists(pdf_path)
-
-if not db_exists and pdf_exists:
-    try:
-        engine.build_vector_database(pdf_path)
-        db_exists = True
-    except Exception as e:
-        st.error(f"Gagal menginisialisasi basis data vektor otomatis: {e}")
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -69,13 +47,6 @@ with st.sidebar:
         st.session_state.preset_query = "Cara membuat motivation letter"
         st.rerun()
 
-    st.divider()
-    st.subheader("🤖 Mode AI & RAG")
-    rag_mode = st.selectbox(
-        "Pilih Engine RAG:",
-        ["n8n Cloud (Mistral + Pinecone)", "Gemini API (RAG Python Lokal)"]
-    )
-
 # --- MAIN CONTENT ---
 st.title("🎓 Kawan Beasiswa")
 
@@ -90,11 +61,6 @@ with tab_chat:
     for chat in st.session_state.chat_history:
         with st.chat_message(chat["role"]):
             st.markdown(chat["content"])
-            if chat["role"] == "assistant" and "sources" in chat and chat["sources"]:
-                with st.expander("🔍 Konteks Dokumen Sumber (RAG)"):
-                    for i, src in enumerate(chat["sources"]):
-                        st.caption(f"**Dokumen {i+1} &bull; Halaman {src['page']}** &bull; Skor Relevansi: {src['score']:.4f}")
-                        st.info(src['text'])
 
     # Chat Input
     query = st.chat_input("Tanyakan syarat, jadwal, atau tips (misal: 'Apa saja syarat beasiswa IISMA?' atau 'Bagi tips wawancara LPDP dong')")
@@ -115,71 +81,28 @@ with tab_chat:
         
         # Assistant generation
         with st.chat_message("assistant"):
-            if rag_mode == "n8n Cloud (Mistral + Pinecone)":
-                with st.spinner("Menghubungi asisten AI di n8n..."):
-                    try:
-                        n8n_url = "https://satori007.app.n8n.cloud/webhook/55d2b961-6b1b-4bb4-9d0a-cacc865fb33c/chat"
-                        payload = {
-                            "chatInput": active_query,
-                            "sessionId": st.session_state.session_id
-                        }
-                        response = requests.post(n8n_url, json=payload)
-                        response.raise_for_status()
-                        response_data = response.json()
-                        
-                        answer = response_data.get("output", "Gagal mendapatkan jawaban dari n8n.")
-                        st.markdown(answer)
-                        
-                        # Save history
-                        st.session_state.chat_history.append({
-                            "role": "assistant",
-                            "content": answer,
-                            "sources": []
-                        })
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Gagal memproses jawaban dari n8n: {e}")
-            else:
-                # Check API Key
-                active_key = gemini_key if llm_provider == "gemini" else openai_key
-                if not active_key:
-                    st.error("🔑 Mohon isi API Key yang sesuai di file konfigurasi/Secrets.")
-                    st.stop()
+            with st.spinner("Menghubungi asisten AI..."):
+                try:
+                    n8n_url = "https://satori007.app.n8n.cloud/webhook/55d2b961-6b1b-4bb4-9d0a-cacc865fb33c/chat"
+                    payload = {
+                        "chatInput": active_query,
+                        "sessionId": st.session_state.session_id
+                    }
+                    response = requests.post(n8n_url, json=payload)
+                    response.raise_for_status()
+                    response_data = response.json()
                     
-                if not db_exists:
-                    st.error("📁 Database vektor belum dibuat dan gagal diinisialisasi secara otomatis.")
-                    st.stop()
-
-                with st.spinner("Mencari referensi beasiswa dan merumuskan jawaban..."):
-                    try:
-                        # 1. Retrieve
-                        retrieved = engine.retrieve(active_query, top_k=15)
-                        
-                        # 2. Rerank
-                        reranked = engine.rerank(active_query, retrieved, top_n=5, cohere_api_key=cohere_key if cohere_key else None)
-                        
-                        # 3. Generate
-                        answer = engine.generate_answer(active_query, reranked, api_key=active_key, model_provider=llm_provider)
-                        
-                        # Output response
-                        st.markdown(answer)
-                        
-                        # Display sources expander
-                        with st.expander("🔍 Konteks Dokumen Sumber (RAG)"):
-                            for i, src in enumerate(reranked):
-                                st.caption(f"**Dokumen {i+1} &bull; Halaman {src['page']}** &bull; Skor Relevansi: {src['score']:.4f}")
-                                st.info(src['text'])
-                                
-                        # Save history
-                        st.session_state.chat_history.append({
-                            "role": "assistant",
-                            "content": answer,
-                            "sources": reranked
-                        })
-                        st.rerun()
-                        
-                    except Exception as e:
-                        st.error(f"Gagal memproses jawaban: {e}")
+                    answer = response_data.get("output", "Gagal mendapatkan jawaban dari n8n.")
+                    st.markdown(answer)
+                    
+                    # Save history
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": answer
+                    })
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Gagal memproses jawaban: {e}")
 
 # --- TAB 2: Ringkasan Panduan ---
 with tab_info:
